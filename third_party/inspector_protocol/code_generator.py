@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -453,8 +454,7 @@ class Protocol(object):
                 elif type["type"] == "object":
                     self.type_definitions[type_name] = create_user_type_definition(domain["domain"], type)
                 elif type["type"] == "array":
-                    items_type = type["items"]["type"]
-                    self.type_definitions[type_name] = wrap_array_definition(self.type_definitions[items_type])
+                    self.type_definitions[type_name] = self.resolve_type(type)
                 elif type["type"] == domain["domain"] + ".string":
                     self.type_definitions[type_name] = create_string_type_definition()
                 else:
@@ -605,7 +605,6 @@ def main():
         # Note these should be sorted in the right order.
         # TODO(dgozman): sort them programmatically based on commented includes.
         lib_h_templates = [
-            "Collections_h.template",
             "ErrorSupport_h.template",
             "Values_h.template",
             "Object_h.template",
