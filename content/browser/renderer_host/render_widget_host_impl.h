@@ -31,6 +31,7 @@
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
+#include "components/metrics/stability_metrics_helper.h"
 #include "components/viz/common/resources/shared_bitmap.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
@@ -101,11 +102,11 @@ class ServerSharedBitmapManager;
 }
 
 namespace content {
-
 class BrowserAccessibilityManager;
 class FlingSchedulerBase;
 class InputRouter;
 class MockRenderWidgetHost;
+class RenderViewHost;
 class RenderWidgetHostOwnerDelegate;
 class SyntheticGestureController;
 class TimeoutMonitor;
@@ -277,6 +278,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // Initializes a RenderWidgetHost that is attached to a RenderFrameHost.
   void InitForFrame();
 
+  // Returns true if the frame content needs be stored before being evicted.
+  bool ShouldShowStaleContentOnEviction();
+
   // Signal whether this RenderWidgetHost is owned by a RenderFrameHost, in
   // which case it does not do self-deletion.
   void set_owned_by_render_frame_host(bool owned_by_rfh) {
@@ -409,6 +413,12 @@ class CONTENT_EXPORT RenderWidgetHostImpl
       const blink::WebMouseWheelEvent& wheel_event,
       const ui::LatencyInfo& latency) override;
 
+  // Resolves the given callback once all effects of prior input have been
+  // fully realized.
+  void WaitForInputProcessed(SyntheticGestureParams::GestureType type,
+                             SyntheticGestureParams::GestureSourceType source,
+                             base::OnceClosure callback);
+
   // Retrieve an iterator over any RenderWidgetHosts that are immediately
   // embedded within this one. This does not return hosts that are embedded
   // indirectly (i.e. nested within embedded hosts).
@@ -483,9 +493,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   bool has_touch_handler() const { return has_touch_handler_; }
 
-  // Set the RenderView background transparency.
-  void SetBackgroundOpaque(bool opaque);
-
   // Called when the response to a pending mouse lock request has arrived.
   // Returns true if |allowed| is true and the mouse has been successfully
   // locked.
@@ -525,7 +532,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   void DidReceiveRendererFrame();
 
-  // Don't check whether we expected a resize ack during layout tests.
+  // Don't check whether we expected a resize ack during web tests.
   static void DisableResizeAckCheckForTesting();
 
   InputRouter* input_router() { return input_router_.get(); }
@@ -712,7 +719,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // 1) |hang_monitor_timeout_| (slow to ack input events) or
   // 2) NavigationHandle::OnCommitTimeout (slow to commit).
   void RendererIsUnresponsive(
-      base::RepeatingClosure restart_hang_monitor_timeout);
+      base::RepeatingClosure restart_hang_monitor_timeout,
+      metrics::RendererHangCause hang_cause);
 
   // Called if we know the renderer is responsive. When we currently think the
   // renderer is unresponsive, this will clear that state and call
@@ -787,6 +795,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
                            ConflictingAllocationsResolve);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            ResizeAndCrossProcessPostMessagePreserveOrder);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostInputEventRouterTest,
+                           EnsureRendererDestroyedHandlesUnAckedTouchEvents);
   friend class MockRenderWidgetHost;
   friend class OverscrollNavigationOverlayTest;
   friend class RenderViewHostTester;
@@ -849,6 +859,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void OnIntrinsicSizingInfoChanged(blink::WebIntrinsicSizingInfo info);
   void OnAnimateDoubleTapZoomInMainFrame(const gfx::Point& point,
                                          const gfx::Rect& rect_to_zoom);
+  void OnZoomToFindInPageRectInMainFrame(const gfx::Rect& rect_to_zoom);
 
   // Called when visual properties have changed in the renderer.
   void DidUpdateVisualProperties(const cc::RenderFrameMetadata& metadata);
@@ -1179,6 +1190,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   bool force_enable_zoom_ = false;
 
   RenderFrameMetadataProviderImpl render_frame_metadata_provider_;
+  bool surface_id_allocation_suppressed_ = false;
 
   const viz::FrameSinkId frame_sink_id_;
 

@@ -28,9 +28,9 @@
 #include "net/spdy/bidirectional_stream_spdy_impl.h"
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_session.h"
-#include "net/third_party/spdy/core/hpack/hpack_constants.h"
-#include "net/third_party/spdy/core/hpack/hpack_huffman_table.h"
-#include "net/third_party/spdy/core/hpack/hpack_static_table.h"
+#include "net/third_party/quiche/src/spdy/core/hpack/hpack_constants.h"
+#include "net/third_party/quiche/src/spdy/core/hpack/hpack_huffman_table.h"
+#include "net/third_party/quiche/src/spdy/core/hpack/hpack_static_table.h"
 
 namespace net {
 
@@ -202,7 +202,8 @@ base::WeakPtr<SpdySession> SpdySessionPool::FindAvailableSession(
       // We can reuse this session only if the proxy and privacy
       // settings match.
       if (!(alias_key.proxy_server() == key.proxy_server()) ||
-          !(alias_key.privacy_mode() == key.privacy_mode())) {
+          !(alias_key.privacy_mode() == key.privacy_mode()) ||
+          !(alias_key.is_proxy_session() == key.is_proxy_session())) {
         continue;
       }
 
@@ -235,11 +236,19 @@ base::WeakPtr<SpdySession> SpdySessionPool::FindAvailableSession(
       // If socket tags differ, see if session's socket tag can be changed.
       if (alias_key.socket_tag() != key.socket_tag()) {
         SpdySessionKey old_key = available_session->spdy_session_key();
+        SpdySessionKey new_key(old_key.host_port_pair(), old_key.proxy_server(),
+                               old_key.privacy_mode(),
+                               old_key.is_proxy_session(), key.socket_tag());
+
+        // If there is already a session with |new_key|, skip this one.
+        // It will be found in |aliases_| in a future iteration.
+        if (available_sessions_.find(new_key) != available_sessions_.end())
+          continue;
 
         if (!available_session->ChangeSocketTag(key.socket_tag()))
           continue;
 
-        const SpdySessionKey& new_key = available_session->spdy_session_key();
+        DCHECK(available_session->spdy_session_key() == new_key);
 
         // This isn't a pooled alias, it's the actual session.
         adding_pooled_alias = false;
@@ -261,9 +270,9 @@ base::WeakPtr<SpdySession> SpdySessionPool::FindAvailableSession(
             continue;
           }
           UnmapKey(*it);
-          SpdySessionKey new_pool_alias_key =
-              SpdySessionKey(it->host_port_pair(), it->proxy_server(),
-                             it->privacy_mode(), key.socket_tag());
+          SpdySessionKey new_pool_alias_key = SpdySessionKey(
+              it->host_port_pair(), it->proxy_server(), it->privacy_mode(),
+              it->is_proxy_session(), key.socket_tag());
           MapKeyToAvailableSession(new_pool_alias_key, available_session);
           auto old_it = it;
           ++it;
