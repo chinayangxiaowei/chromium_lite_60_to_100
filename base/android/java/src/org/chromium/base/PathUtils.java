@@ -22,7 +22,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -205,10 +204,11 @@ public abstract class PathUtils {
         try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
             long time = SystemClock.elapsedRealtime();
             String downloadsPath =
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                            .getPath();
-            RecordHistogram.recordTimesHistogram("Android.StrictMode.DownloadsDir",
-                    SystemClock.elapsedRealtime() - time, TimeUnit.MILLISECONDS);
+                        Environment
+                                .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                                .getPath();
+            RecordHistogram.recordTimesHistogram(
+                    "Android.StrictMode.DownloadsDir", SystemClock.elapsedRealtime() - time);
             return downloadsPath;
         }
     }

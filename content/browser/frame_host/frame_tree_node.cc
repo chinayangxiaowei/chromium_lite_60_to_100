@@ -18,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/frame_host/frame_tree.h"
+#include "content/browser/frame_host/navigation_controller_impl.h"
 #include "content/browser/frame_host/navigation_request.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
@@ -138,6 +139,8 @@ FrameTreeNode::~FrameTreeNode() {
   // Remove the children.
   current_frame_host()->ResetChildren();
 
+  current_frame_host()->ResetLoadingState();
+
   // If the removed frame was created by a script, then its history entry will
   // never be reused - we can save some memory by removing the history entry.
   // See also https://crbug.com/784356.
@@ -161,12 +164,43 @@ FrameTreeNode::~FrameTreeNode() {
 
   g_frame_tree_node_id_map.Get().erase(frame_tree_node_id_);
 
+  bool did_stop_loading = false;
+
   if (navigation_request_) {
+    navigation_request_.reset();
     // PlzNavigate: if a frame with a pending navigation is detached, make sure
     // the WebContents (and its observers) update their loading state.
-    navigation_request_.reset();
-    DidStopLoading();
+    did_stop_loading = true;
   }
+
+  // ~SiteProcessCountTracker DCHECKs in some tests if the speculative
+  // RenderFrameHostImpl is not destroyed last. Ideally this would be closer to
+  // (possible before) the ResetLoadingState() call above.
+  //
+  // There is an inherent race condition causing bugs 838348/915179/et al, where
+  // the renderer may have committed the speculative main frame and the browser
+  // has not heard about it yet. If this is a main frame, then in that case the
+  // speculative RenderFrame was unable to be deleted (it is owned by the
+  // renderer) and we should not be able to cancel the navigation at this point.
+  // CleanUpNavigation() would normally be called here but it will try to undo
+  // the navigation and expose the race condition. When it replaces the main
+  // frame with a RenderFrameProxy, that leaks the committed main frame, leaving
+  // the frame and its friend group with pointers that will become invalid
+  // shortly as we are shutting everything down and deleting the RenderView etc.
+  // We avoid this problematic situation by not calling CleanUpNavigation() or
+  // DiscardUnusedFrame() here. The speculative RenderFrameHost is simply
+  // returned and deleted immediately. This satisfies the requirement that the
+  // speculative RenderFrameHost is removed from the RenderFrameHostManager
+  // before it is destroyed.
+  if (render_manager_.speculative_frame_host()) {
+    did_stop_loading |= render_manager_.speculative_frame_host()->is_loading();
+    render_manager_.UnsetSpeculativeRenderFrameHost();
+  }
+
+  if (did_stop_loading)
+    DidStopLoading();
+
+  DCHECK(!IsLoading());
 }
 
 void FrameTreeNode::AddObserver(Observer* observer) {
@@ -190,14 +224,10 @@ void FrameTreeNode::ResetForNavigation() {
   // frame.
   UpdateFramePolicyHeaders(blink::WebSandboxFlags::kNone, {});
 
-  // TODO(crbug.com/736415): Clear this bit unconditionally for all frames.
-  if (IsMainFrame()) {
-    // This frame has had its user activation bits cleared in the renderer
-    // before arriving here. We just need to clear them here and in the other
-    // renderer processes that may have a reference to this frame.
-    UpdateUserActivationState(
-        blink::UserActivationUpdateType::kClearActivation);
-  }
+  // This frame has had its user activation bits cleared in the renderer
+  // before arriving here. We just need to clear them here and in the other
+  // renderer processes that may have a reference to this frame.
+  UpdateUserActivationState(blink::UserActivationUpdateType::kClearActivation);
 }
 
 void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
@@ -575,6 +605,11 @@ bool FrameTreeNode::NotifyUserActivation() {
     }
   }
 
+  NavigationControllerImpl* controller =
+      static_cast<NavigationControllerImpl*>(navigator()->GetController());
+  if (controller)
+    controller->NotifyUserActivation();
+
   return true;
 }
 
@@ -586,9 +621,6 @@ bool FrameTreeNode::ConsumeTransientUserActivation() {
 }
 
 bool FrameTreeNode::ClearUserActivation() {
-  // Only received for a new main frame.
-  // TODO(crbug.com/736415): Clear this bit unconditionally for all frames.
-  DCHECK(IsMainFrame());
   for (FrameTreeNode* node : frame_tree()->SubtreeNodes(this))
     node->user_activation_state_.Clear();
   return true;
@@ -664,6 +696,14 @@ void FrameTreeNode::PruneChildFrameNavigationEntries(
     } else {
       child->PruneChildFrameNavigationEntries(entry);
     }
+  }
+}
+
+void FrameTreeNode::SetOpenerFeaturePolicyState(
+    const blink::FeaturePolicy::FeatureState& feature_state) {
+  DCHECK(IsMainFrame());
+  if (base::FeatureList::IsEnabled(features::kFeaturePolicyForSandbox)) {
+    replication_state_.opener_feature_state = feature_state;
   }
 }
 
