@@ -4,7 +4,6 @@
 
 #include <string>
 
-#include "build/build_config.h"
 #include "chrome/browser/offline_pages/download_archive_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -27,7 +26,6 @@ DownloadArchiveManager::~DownloadArchiveManager() {}
 
 const base::FilePath& DownloadArchiveManager::GetPublicArchivesDir() {
   if (prefs_) {
-#if !defined(OS_ANDROID)
     // Use the preference set by the download location dialog, if present.
     std::string directory_preference =
         prefs_->GetString(prefs::kDownloadDefaultDirectory);
@@ -37,7 +35,6 @@ const base::FilePath& DownloadArchiveManager::GetPublicArchivesDir() {
       // funciton call.
       return download_archives_dir_;
     }
-#endif
   }
 
   return ArchiveManager::GetPublicArchivesDir();
