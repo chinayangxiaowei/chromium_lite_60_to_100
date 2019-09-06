@@ -123,6 +123,8 @@ class MetaBuildWrapper(object):
     subp.add_argument('output_path',
                       help='path to a file containing the output arguments '
                            'as a JSON object.')
+    subp.add_argument('--json_output',
+                      help='Write errors to json.output')
     subp.set_defaults(func=self.CmdAnalyze)
 
     subp = subps.add_parser('export',
@@ -141,6 +143,8 @@ class MetaBuildWrapper(object):
     subp.add_argument('--swarming-targets-file',
                       help='save runtime dependencies for targets listed '
                            'in file.')
+    subp.add_argument('--json_output',
+                      help='Write errors to json.output')
     subp.add_argument('path',
                       help='path to generate build into')
     subp.set_defaults(func=self.CmdGen)
@@ -352,13 +356,17 @@ class MetaBuildWrapper(object):
     if not vals:
       return 1
     if self.args.build:
+      self.Print('')
       ret = self.Build(self.args.target)
       if ret:
         return ret
+
+    self.Print('')
     ret = self.RunGNIsolate(vals)
     if ret:
       return ret
 
+    self.Print('')
     if self.args.swarmed:
       return self._RunUnderSwarming(self.args.path, self.args.target)
     else:
@@ -450,8 +458,24 @@ class MetaBuildWrapper(object):
         '-I', isolate_server,
         '--namespace', namespace,
       ]
-    ret, out, _ = self.Run(cmd, force_verbose=False)
+
+    # Talking to the isolateserver may fail because we're not logged in.
+    # We trap the command explicitly and rewrite the error output so that
+    # the error message is actually correct for a Chromium check out.
+    self.PrintCmd(cmd, env=None)
+    ret, out, err = self.Run(cmd, force_verbose=False)
     if ret:
+      self.Print('  -> returned %d' % ret)
+      if out:
+        self.Print(out, end='')
+      if err:
+        # The swarming client will return an exit code of 2 (via
+        # argparse.ArgumentParser.error()) and print a message to indicate
+        # that auth failed, so we have to parse the message to check.
+        if (ret == 2 and 'Please login to' in err):
+          err = err.replace(' auth.py', ' tools/swarming_client/auth.py')
+          self.Print(err, end='', file=sys.stderr)
+
       return ret
 
     isolated_hash = out.splitlines()[0].split()[0]
@@ -467,6 +491,7 @@ class MetaBuildWrapper(object):
     self._AddBaseSoftware(cmd)
     if self.args.extra_args:
       cmd += ['--'] + self.args.extra_args
+    self.Print('')
     ret, _, _ = self.Run(cmd, force_verbose=True, buffer_output=False)
     return ret
 
@@ -807,8 +832,11 @@ class MetaBuildWrapper(object):
       self.WriteFile(gn_runtime_deps_path, '\n'.join(labels) + '\n')
       cmd.append('--runtime-deps-list-file=%s' % gn_runtime_deps_path)
 
-    ret, _, _ = self.Run(cmd)
+    ret, output, _ = self.Run(cmd)
     if ret:
+      if getattr(self.args, 'json_output', None) and output:
+        # write errors to json.output
+        self.WriteJSON({'output': output}, self.args.json_output)
       # If `gn gen` failed, we should exit early rather than trying to
       # generate isolates. Run() will have already logged any error output.
       self.Print('GN gen failed: %d' % ret)
@@ -1500,7 +1528,7 @@ class MetaBuildWrapper(object):
     if self.args.jobs:
       ninja_cmd.extend(['-j', '%d' % self.args.jobs])
     ninja_cmd.append(target)
-    ret, _, _ = self.Run(ninja_cmd, force_verbose=False, buffer_output=False)
+    ret, _, _ = self.Run(ninja_cmd, buffer_output=False)
     return ret
 
   def Run(self, cmd, env=None, force_verbose=True, buffer_output=True):
@@ -1515,6 +1543,7 @@ class MetaBuildWrapper(object):
       if ret:
         self.Print('  -> returned %d' % ret)
       if out:
+        # This is the error seen on the logs
         self.Print(out, end='')
       if err:
         self.Print(err, end='', file=sys.stderr)
