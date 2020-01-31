@@ -579,7 +579,7 @@ class ChildProcess {
 
 // This mimics the Chrome side of the IPC.
 MULTIPROCESS_TEST_MAIN(ProtoChromePromptIPCClientMain) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   ChildProcess child_process;
   if (!child_process.Run()) {
@@ -593,7 +593,7 @@ class ProtoChromePromptIPCTest
     : public ::testing::TestWithParam<
           std::tuple<bool, bool, PromptAcceptance, ChromeDisconnectPoint>> {
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 };
 
 class ParentProcess {
@@ -842,7 +842,7 @@ class ProtoChromePromptSameProcessTest : public ::testing::Test {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   std::unique_ptr<MockChrome> mock_chrome_;
   std::unique_ptr<ProtoChromePromptIPC> chrome_prompt_ipc_;

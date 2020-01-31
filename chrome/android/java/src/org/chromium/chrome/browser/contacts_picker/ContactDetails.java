@@ -5,7 +5,8 @@
 package org.chromium.chrome.browser.contacts_picker;
 
 import android.content.res.Resources;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.chrome.R;
 
@@ -50,7 +51,7 @@ public class ContactDetails implements Comparable<ContactDetails> {
      */
     public ContactDetails(
             String id, String displayName, List<String> emails, List<String> phoneNumbers) {
-        mDisplayName = displayName;
+        mDisplayName = displayName != null ? displayName : "";
         mEmails = emails != null ? new ArrayList<String>(emails) : new ArrayList<String>();
         mPhoneNumbers = phoneNumbers != null ? new ArrayList<String>(phoneNumbers)
                                              : new ArrayList<String>();
