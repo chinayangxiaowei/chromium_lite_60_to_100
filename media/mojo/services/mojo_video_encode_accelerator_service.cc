@@ -45,21 +45,26 @@ MojoVideoEncodeAcceleratorService::~MojoVideoEncodeAcceleratorService() {
 
 void MojoVideoEncodeAcceleratorService::Initialize(
     const media::VideoEncodeAccelerator::Config& config,
-    mojom::VideoEncodeAcceleratorClientPtr client,
+    mojo::PendingRemote<mojom::VideoEncodeAcceleratorClient> client,
     InitializeCallback success_callback) {
   DVLOG(1) << __func__ << " " << config.AsHumanReadableString();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!encoder_);
   DCHECK(config.input_format == PIXEL_FORMAT_I420 ||
          config.input_format == PIXEL_FORMAT_NV12)
       << "Only I420 or NV12 format supported";
+
+  if (encoder_) {
+    DLOG(ERROR) << __func__ << " VEA is already initialized";
+    std::move(success_callback).Run(false);
+    return;
+  }
 
   if (!client) {
     DLOG(ERROR) << __func__ << "null |client|";
     std::move(success_callback).Run(false);
     return;
   }
-  vea_client_ = std::move(client);
+  vea_client_.Bind(std::move(client));
 
   if (config.input_visible_size.width() > limits::kMaxDimension ||
       config.input_visible_size.height() > limits::kMaxDimension ||

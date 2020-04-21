@@ -52,6 +52,9 @@ const wchar_t kDefaultProfilePictureFileExtension[] = L".jpg";
 
 namespace {
 
+// Minimum supported version of Chrome for GCPW.
+constexpr char kMinimumSupportedChromeVersionStr[] = "77.0.3865.65";
+
 constexpr char kSentinelFilename[] = "gcpw_startup.sentinel";
 constexpr base::FilePath::CharType kCredentialProviderFolder[] =
     L"Credential Provider";
@@ -132,7 +135,7 @@ void DeleteVersionDirectory(const base::FilePath& version_path) {
   // Release the locks, actually deleting the files.  It is now possible to
   // delete the version path.
   locks.clear();
-  if (all_deletes_succeeded && !base::DeleteFile(version_path, true))
+  if (all_deletes_succeeded && !base::DeleteFileRecursively(version_path))
     LOGFN(ERROR) << "Could not delete version " << version_path.BaseName();
 }
 
@@ -529,8 +532,9 @@ HRESULT GetEntryPointArgumentForRunDll(HINSTANCE dll_handle,
 
   // rundll32 expects the first command line argument to be the path to the
   // DLL, followed by a comma and the name of the function to call.  There can
-  // be no spaces around the comma.  There can be no spaces in the path.  It
-  // is recommended to use the short path name of the DLL.
+  // be no spaces around the comma. The dll path is quoted because short names
+  // may be disabled in the system and path can not have space otherwise. It is
+  // recommended to use the short path name of the DLL.
   base::FilePath path_to_dll;
   HRESULT hr = GetPathToDllFromHandle(dll_handle, &path_to_dll);
   if (FAILED(hr))
@@ -546,8 +550,8 @@ HRESULT GetEntryPointArgumentForRunDll(HINSTANCE dll_handle,
     return hr;
   }
 
-  *entrypoint_arg =
-      base::string16(base::StringPrintf(L"%ls,%ls", short_path, entrypoint));
+  *entrypoint_arg = base::string16(
+      base::StringPrintf(L"\"%ls\",%ls", short_path, entrypoint));
 
   // In tests, the current module is the unittest exe, not the real dll.
   // The unittest exe does not expose entrypoints, so return S_FALSE as a hint
@@ -695,6 +699,15 @@ base::string16 GetStringResource(int base_message_id) {
   return localized_string;
 }
 
+base::string16 GetStringResource(int base_message_id,
+                                 const std::vector<base::string16>& subst) {
+  base::string16 format_string = GetStringResource(base_message_id);
+  base::string16 formatted =
+      base::ReplaceStringPlaceholders(format_string, subst, nullptr);
+
+  return formatted;
+}
+
 base::string16 GetSelectedLanguage() {
   return GetLanguageSelector().matched_candidate();
 }
@@ -789,6 +802,10 @@ base::string16 GetWindowsVersion() {
     return release_id;
 
   return L"Unknown";
+}
+
+base::Version GetMinimumSupportedChromeVersion() {
+  return base::Version(kMinimumSupportedChromeVersionStr);
 }
 
 FakesForTesting::FakesForTesting() {}

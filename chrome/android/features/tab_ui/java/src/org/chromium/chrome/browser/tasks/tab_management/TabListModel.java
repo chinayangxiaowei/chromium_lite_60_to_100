@@ -142,8 +142,9 @@ class TabListModel extends ModelList {
         int status = isSelected ? ClosableTabGridView.AnimationStatus.SELECTED_CARD_ZOOM_IN
                                 : ClosableTabGridView.AnimationStatus.SELECTED_CARD_ZOOM_OUT;
         if (index < 0 || index >= size()
-                || get(index).model.get(TabProperties.CARD_ANIMATION_STATUS) == status)
+                || get(index).model.get(TabProperties.CARD_ANIMATION_STATUS) == status) {
             return;
+        }
 
         get(index).model.set(TabProperties.CARD_ANIMATION_STATUS, status);
         get(index).model.set(TabProperties.ALPHA, isSelected ? 0.8f : 1f);
@@ -161,8 +162,9 @@ class TabListModel extends ModelList {
         int status = isHovered ? ClosableTabGridView.AnimationStatus.HOVERED_CARD_ZOOM_IN
                                : ClosableTabGridView.AnimationStatus.HOVERED_CARD_ZOOM_OUT;
         if (index < 0 || index >= size()
-                || get(index).model.get(TabProperties.CARD_ANIMATION_STATUS) == status)
+                || get(index).model.get(TabProperties.CARD_ANIMATION_STATUS) == status) {
             return;
+        }
         get(index).model.set(TabProperties.CARD_ANIMATION_STATUS, status);
     }
 }

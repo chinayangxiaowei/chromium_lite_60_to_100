@@ -83,6 +83,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "testing/gtest/include/gtest/gtest-param-test.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -416,11 +417,11 @@ class HostedAppTest : public extensions::ExtensionBrowserTest,
   }
 
   web_app::AppId InstallShortcutAppForCurrentUrl() {
-    chrome::SetAutoAcceptBookmarkAppDialogForTesting(true);
+    chrome::SetAutoAcceptBookmarkAppDialogForTesting(true, false);
     web_app::WebAppInstallObserver observer(profile());
     CHECK(chrome::ExecuteCommand(browser(), IDC_CREATE_SHORTCUT));
     web_app::AppId app_id = observer.AwaitNextInstall();
-    chrome::SetAutoAcceptBookmarkAppDialogForTesting(false);
+    chrome::SetAutoAcceptBookmarkAppDialogForTesting(false, false);
     return app_id;
   }
 
@@ -973,7 +974,7 @@ IN_PROC_BROWSER_TEST_P(HostedAppPWAOnlyTest, PWASizeIsCorrectlyRestored) {
   EXPECT_TRUE(web_app::AppBrowserController::IsForWebAppBrowser(app_browser_));
   NavigateToURLAndWait(app_browser_, GetSecureAppURL());
 
-  gfx::Rect bounds = gfx::Rect(10, 10, 500, 500);
+  gfx::Rect bounds = gfx::Rect(50, 50, 500, 500);
   app_browser_->window()->SetBounds(bounds);
   app_browser_->window()->Close();
 
@@ -991,7 +992,7 @@ IN_PROC_BROWSER_TEST_P(HostedAppPWAOnlyTest,
   EXPECT_TRUE(web_app::AppBrowserController::IsForWebAppBrowser(app_browser_));
   NavigateToURLAndWait(app_browser_, GetSecureAppURL());
 
-  gfx::Rect bounds = gfx::Rect(10, 10, 500, 500);
+  gfx::Rect bounds = gfx::Rect(50, 50, 500, 500);
   app_browser_->window()->SetBounds(bounds);
   app_browser_->window()->Close();
 
@@ -999,6 +1000,7 @@ IN_PROC_BROWSER_TEST_P(HostedAppPWAOnlyTest,
 
   sessions::TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(profile());
+  ASSERT_GT(service->entries().size(), 0U);
   service->RestoreMostRecentEntry(nullptr);
 
   content::WebContents* restored_web_contents =
@@ -1239,7 +1241,7 @@ IN_PROC_BROWSER_TEST_P(SharedPWATest, InstallInstallableSite) {
   EXPECT_EQ(registrar().GetAppShortName(app_id), GetInstallableAppName());
 
   // Installed PWAs should launch in their own window.
-  EXPECT_EQ(registrar().GetAppDisplayMode(app_id),
+  EXPECT_EQ(registrar().GetAppUserDisplayMode(app_id),
             blink::mojom::DisplayMode::kStandalone);
 
   EXPECT_EQ(1, user_action_tester.GetActionCount("InstallWebAppFromMenu"));
@@ -1254,7 +1256,7 @@ IN_PROC_BROWSER_TEST_P(SharedPWATest, CreateShortcutForInstallableSite) {
   web_app::AppId app_id = InstallShortcutAppForCurrentUrl();
   EXPECT_EQ(registrar().GetAppShortName(app_id), GetInstallableAppName());
   // Bookmark apps to PWAs should launch in a tab.
-  EXPECT_EQ(registrar().GetAppDisplayMode(app_id),
+  EXPECT_EQ(registrar().GetAppUserDisplayMode(app_id),
             blink::mojom::DisplayMode::kBrowser);
 
   EXPECT_EQ(0, user_action_tester.GetActionCount("InstallWebAppFromMenu"));
@@ -1282,8 +1284,8 @@ IN_PROC_BROWSER_TEST_P(SharedPWATest, CanInstallOverTabPwa) {
   NavigateToURLAndWait(browser(), GetInstallableAppURL());
   web_app::AppId app_id = InstallPwaForCurrentUrl();
   // Change display mode to open in tab.
-  registry_controller().SetAppDisplayMode(app_id,
-                                          blink::mojom::DisplayMode::kBrowser);
+  registry_controller().SetAppUserDisplayMode(
+      app_id, blink::mojom::DisplayMode::kBrowser);
 
   Browser* new_browser =
       NavigateInNewWindowAndAwaitInstallabilityCheck(GetInstallableAppURL());
@@ -1300,7 +1302,7 @@ IN_PROC_BROWSER_TEST_P(SharedPWATest, CannotInstallOverWindowShortcutApp) {
   NavigateToURLAndWait(browser(), GetInstallableAppURL());
   web_app::AppId app_id = InstallShortcutAppForCurrentUrl();
   // Change launch container to open in window.
-  registry_controller().SetAppDisplayMode(
+  registry_controller().SetAppUserDisplayMode(
       app_id, blink::mojom::DisplayMode::kStandalone);
 
   Browser* new_browser =
@@ -1389,7 +1391,13 @@ IN_PROC_BROWSER_TEST_P(SharedPWATest, InstallToShelfContainsAppName) {
 IN_PROC_BROWSER_TEST_P(HostedAppPWAOnlyTest, OverscrollEnabled) {
   ASSERT_TRUE(https_server()->Start());
   InstallSecurePWA();
+
+  // Overscroll is only enabled on Aura platforms currently.
+#if defined(USE_AURA)
   EXPECT_TRUE(app_browser_->CanOverscrollContent());
+#else
+  EXPECT_FALSE(app_browser_->CanOverscrollContent());
+#endif
 }
 
 // Tests that mixed content is not loaded inside PWA windows.
@@ -1585,18 +1593,6 @@ IN_PROC_BROWSER_TEST_P(HostedAppTest, CreatedForInstalledPwaForNonPwas) {
   EXPECT_FALSE(app_browser_->app_controller()->CreatedForInstalledPwa());
 }
 
-IN_PROC_BROWSER_TEST_P(SharedPWATest, CreatedForInstalledPwaForPwa) {
-  WebApplicationInfo web_app_info;
-  web_app_info.app_url = GURL(kExampleURL);
-  web_app_info.scope = GURL(kExampleURL);
-
-  // TODO (crbug.com/876576): Remove references to extensions in SharedPWATest.
-  const extensions::Extension* app = InstallBookmarkApp(web_app_info);
-  Browser* app_browser = LaunchAppBrowser(app);
-
-  EXPECT_TRUE(app_browser->app_controller()->CreatedForInstalledPwa());
-}
-
 // Check the 'Copy URL' menu button for Hosted App windows.
 IN_PROC_BROWSER_TEST_P(HostedAppPWAOnlyTest, CopyURL) {
   WebApplicationInfo web_app_info;
@@ -1724,6 +1720,21 @@ class HostedAppProcessModelTest : public HostedAppTest {
   void SetUpOnMainThread() override {
     HostedAppTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
+
+    // Some tests make requests to URLs that purposefully end with a double
+    // slash to test this edge case (note that "//" is a valid path).  Install
+    // a custom handler to return dummy content for such requests before
+    // starting the test server.
+    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+        [](const net::test_server::HttpRequest& request)
+            -> std::unique_ptr<net::test_server::HttpResponse> {
+          if (request.relative_url == "//") {
+            return std::make_unique<net::test_server::RawHttpResponse>(
+                "HTTP/1.1 200 OK", "Hello there!");
+          }
+          return nullptr;
+        }));
+
     embedded_test_server()->StartAcceptingConnections();
 
     should_swap_for_cross_site_ = content::AreAllSitesIsolatedForTesting();
@@ -2188,6 +2199,56 @@ IN_PROC_BROWSER_TEST_P(HostedAppProcessModelTest, MAYBE_FromOutsideHostedApp) {
     TestPopupProcess(cross_site_rfh, app_url, should_swap_for_cross_site_,
                      true);
   }
+}
+
+// Tests that a packaged app is not considered an installed bookmark app.
+IN_PROC_BROWSER_TEST_P(HostedAppProcessModelTest,
+                       AppRegistrarExcludesPackaged) {
+  SetupApp("https_app");
+  EXPECT_FALSE(registrar().IsInstalled(app_->id()));
+}
+
+// Check that we can successfully complete a navigation to an app URL with a
+// "//" path (on which GURL::Resolve() currently fails due to
+// https://crbug.com/1034197), and that the resulting SiteInstance has a valid
+// site URL. See https://crbug.com/1016954.
+IN_PROC_BROWSER_TEST_P(HostedAppProcessModelTest,
+                       NavigateToAppURLWithDoubleSlashPath) {
+  // Set up and launch the hosted app.
+  GURL app_url =
+      embedded_test_server()->GetURL("app.site.com", "/frame_tree/simple.htm");
+  extensions::TestExtensionDir test_app_dir;
+  test_app_dir.WriteManifest(base::StringPrintf(kHostedAppProcessModelManifest,
+                                                app_url.spec().c_str()));
+  SetupApp(test_app_dir.UnpackedPath());
+
+  // Navigate to a URL under the app's extent, but with a path (//) that
+  // GURL::Resolve() fails to resolve against a relative URL (see the
+  // explanation in https://crbug.com/1034197).  Avoid giving the "//" directly
+  // to EmbeddedTestServer::GetURL(), which also uses GURL::Resolve()
+  // internally and would otherwise produce an empty/invalid URL to navigate
+  // to.
+  GURL double_slash_path_app_url =
+      embedded_test_server()->GetURL("isolated.site.com", "/");
+  GURL::Replacements replace_path;
+  replace_path.SetPathStr("//");
+  double_slash_path_app_url =
+      double_slash_path_app_url.ReplaceComponents(replace_path);
+
+  ui_test_utils::NavigateToURL(browser(), double_slash_path_app_url);
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  RenderFrameHost* main_frame = contents->GetMainFrame();
+  EXPECT_EQ(double_slash_path_app_url, main_frame->GetLastCommittedURL());
+
+  // The resulting page should load in an app process, and the corresponding
+  // SiteInstance's site URL should be a valid, non-empty chrome-extension://
+  // URL with a valid host that corresponds to the app's ID.
+  EXPECT_TRUE(process_map_->Contains(main_frame->GetProcess()->GetID()));
+  EXPECT_FALSE(main_frame->GetSiteInstance()->GetSiteURL().is_empty());
+  EXPECT_TRUE(main_frame->GetSiteInstance()->GetSiteURL().SchemeIs(
+      extensions::kExtensionScheme));
+  EXPECT_EQ(main_frame->GetSiteInstance()->GetSiteURL().host(), app_->id());
 }
 
 // Helper class that sets up two isolated origins, where one is a subdomain of
@@ -2723,35 +2784,6 @@ IN_PROC_BROWSER_TEST_P(HostedAppProcessModelTest,
   EXPECT_EQ("bar",
             content::EvalJs(bar_contents2,
                             "window.open('', 'bg2').document.body.innerText"));
-}
-
-IN_PROC_BROWSER_TEST_P(SharedPWATest, ThemeColor) {
-  // TODO (crbug.com/876576): Remove references to extensions in SharedPWATest.
-  {
-    WebApplicationInfo web_app_info;
-    web_app_info.app_url = GURL(kExampleURL);
-    web_app_info.scope = GURL(kExampleURL);
-    web_app_info.theme_color = SkColorSetA(SK_ColorBLUE, 0xF0);
-    const extensions::Extension* app = InstallBookmarkApp(web_app_info);
-    Browser* app_browser = LaunchAppBrowser(app);
-
-    EXPECT_EQ(web_app::GetAppIdFromApplicationName(app_browser->app_name()),
-              app->id());
-    EXPECT_EQ(SkColorSetA(*web_app_info.theme_color, SK_AlphaOPAQUE),
-              app_browser->app_controller()->GetThemeColor());
-  }
-  {
-    WebApplicationInfo web_app_info;
-    web_app_info.app_url = GURL("http://example.org/2");
-    web_app_info.scope = GURL("http://example.org/");
-    web_app_info.theme_color = base::Optional<SkColor>();
-    const extensions::Extension* app = InstallBookmarkApp(web_app_info);
-    Browser* app_browser = LaunchAppBrowser(app);
-
-    EXPECT_EQ(web_app::GetAppIdFromApplicationName(app_browser->app_name()),
-              app->id());
-    EXPECT_EQ(base::nullopt, app_browser->app_controller()->GetThemeColor());
-  }
 }
 
 // Check that toolbar is not shown for apps hosted within extensions pages.

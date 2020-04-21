@@ -88,7 +88,7 @@ void BiquadFilterHandler::Process(uint32_t frames_to_process) {
       PostCrossThreadTask(
           *task_runner_, FROM_HERE,
           CrossThreadBindOnce(&BiquadFilterHandler::NotifyBadState,
-                              WrapRefCounted(this)));
+                              AsWeakPtr()));
     }
   }
 }
@@ -245,23 +245,28 @@ void BiquadFilterNode::getFrequencyResponse(
     NotShared<DOMFloat32Array> mag_response,
     NotShared<DOMFloat32Array> phase_response,
     ExceptionState& exception_state) {
-  unsigned frequency_hz_length = frequency_hz.View()->length();
+  unsigned frequency_hz_length =
+      frequency_hz.View()->deprecatedLengthAsUnsigned();
 
-  if (mag_response.View()->length() != frequency_hz_length) {
+  if (mag_response.View()->deprecatedLengthAsUnsigned() !=
+      frequency_hz_length) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
         ExceptionMessages::IndexOutsideRange(
-            "magResponse length", mag_response.View()->length(),
+            "magResponse length",
+            mag_response.View()->deprecatedLengthAsUnsigned(),
             frequency_hz_length, ExceptionMessages::kInclusiveBound,
             frequency_hz_length, ExceptionMessages::kInclusiveBound));
     return;
   }
 
-  if (phase_response.View()->length() != frequency_hz_length) {
+  if (phase_response.View()->deprecatedLengthAsUnsigned() !=
+      frequency_hz_length) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
         ExceptionMessages::IndexOutsideRange(
-            "phaseResponse length", phase_response.View()->length(),
+            "phaseResponse length",
+            phase_response.View()->deprecatedLengthAsUnsigned(),
             frequency_hz_length, ExceptionMessages::kInclusiveBound,
             frequency_hz_length, ExceptionMessages::kInclusiveBound));
     return;

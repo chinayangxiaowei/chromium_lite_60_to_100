@@ -419,7 +419,7 @@ std::unique_ptr<em::PolicyData> OwnerSettingsServiceChromeOS::AssemblePolicy(
   policy->set_timestamp(
       (base::Time::Now() - base::Time::UnixEpoch()).InMilliseconds());
   policy->set_username(user_id);
-  if (policy_data->management_mode() == em::PolicyData::LOCAL_OWNER)
+  if (policy->management_mode() == em::PolicyData::LOCAL_OWNER)
     FixupLocalOwnerPolicy(user_id, settings);
   if (!settings->SerializeToString(policy->mutable_policy_value()))
     return std::unique_ptr<em::PolicyData>();
@@ -697,18 +697,11 @@ void OwnerSettingsServiceChromeOS::ReloadKeypairImpl(const base::Callback<
   if (waiting_for_tpm_token_ || waiting_for_easy_unlock_operation_finshed_)
     return;
 
-  bool rv = base::PostTask(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&LoadPrivateKeyOnIOThread, owner_key_util_,
                      ProfileHelper::GetUserIdHashFromProfile(profile_),
                      callback));
-  if (!rv) {
-    // IO thread doesn't exists in unit tests, but it's safe to use NSS from
-    // BlockingPool in unit tests.
-    LoadPrivateKeyOnIOThread(owner_key_util_,
-                             ProfileHelper::GetUserIdHashFromProfile(profile_),
-                             callback);
-  }
 }
 
 void OwnerSettingsServiceChromeOS::StorePendingChanges() {
@@ -742,8 +735,8 @@ void OwnerSettingsServiceChromeOS::StorePendingChanges() {
       base::CreateTaskRunner({base::ThreadPool(), base::MayBlock()});
   bool rv = AssembleAndSignPolicyAsync(
       task_runner.get(), std::move(policy),
-      base::Bind(&OwnerSettingsServiceChromeOS::OnPolicyAssembledAndSigned,
-                 store_settings_factory_.GetWeakPtr()));
+      base::BindOnce(&OwnerSettingsServiceChromeOS::OnPolicyAssembledAndSigned,
+                     store_settings_factory_.GetWeakPtr()));
   if (!rv)
     ReportStatusAndContinueStoring(false /* success */);
 }

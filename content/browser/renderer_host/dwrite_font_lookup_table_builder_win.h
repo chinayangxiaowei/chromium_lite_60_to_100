@@ -128,7 +128,15 @@ class CONTENT_EXPORT DWriteFontLookupTableBuilder {
     std::vector<std::string> extracted_names;
   };
 
-  using FamilyResult = std::vector<FontFileWithUniqueNames>;
+  struct FamilyResult {
+    FamilyResult();
+    FamilyResult(FamilyResult&& other);
+    ~FamilyResult();
+    std::vector<FontFileWithUniqueNames> font_files_with_names;
+    HRESULT exit_hresult{S_OK};
+
+    DISALLOW_COPY_AND_ASSIGN(FamilyResult);
+  };
 
   // Try to find a serialized lookup table from the cache directory specified at
   // construction and load it into memory.
@@ -167,6 +175,21 @@ class CONTENT_EXPORT DWriteFontLookupTableBuilder {
   // that font unique name lookup table construction is complete. Serializes the
   // constructed protobuf to disk.
   void FinalizeFontTable();
+
+  // Internal implementation of adding a callback request to the list in order
+  // to sequentialise access to pending_callbacks_.
+  void QueueShareMemoryRegionWhenReadyImpl(
+      scoped_refptr<base::SequencedTaskRunner> task_runner,
+      blink::mojom::DWriteFontProxy::GetUniqueNameLookupTableCallback callback);
+
+  // Internal implementation of posting the callbacks, running on the sequence
+  // that sequentialises access to pending_callbacks_.
+  void PostCallbacksImpl();
+
+  // Resets the internal task runner guarding access to pending_callbacks_, used
+  // in unit tests, as the TaskEnvironment used in tests tears down and resets
+  // the ThreadPool between tests, and the TaskRunner depends on it.
+  void ResetCallbacksAccessTaskRunner();
 
   void OnTimeout();
 
@@ -223,6 +246,9 @@ class CONTENT_EXPORT DWriteFontLookupTableBuilder {
   };
 
   std::vector<CallbackOnTaskRunner> pending_callbacks_;
+  std::map<HRESULT, unsigned> scanning_error_reasons_;
+  scoped_refptr<base::SequencedTaskRunner> callbacks_access_task_runner_;
+  SEQUENCE_CHECKER(callbacks_access_sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(DWriteFontLookupTableBuilder);
 };

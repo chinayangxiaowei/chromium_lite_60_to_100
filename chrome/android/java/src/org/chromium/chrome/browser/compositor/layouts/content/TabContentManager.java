@@ -17,11 +17,13 @@ import android.view.ViewGroup.MarginLayoutParams;
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
 import org.chromium.base.CommandLine;
 import org.chromium.base.PathUtils;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.ThreadUtils;
+import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
@@ -30,12 +32,12 @@ import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.FeatureUtilities;
 import org.chromium.chrome.browser.native_page.FrozenNativePage;
 import org.chromium.chrome.browser.native_page.NativePage;
 import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.usage_stats.SuspendedTab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.display.DisplayAndroid;
@@ -85,6 +87,17 @@ public class TabContentManager {
     private boolean mSnapshotsEnabled;
 
     private float mExpectedThumbnailAspectRatio;
+
+    /**
+     * Listener to receive the "Last Thumbnail" event. "Last Thumbnail" is the first time
+     * in the Activity life cycle that all the thumbnails in the Grid Tab Switcher are shown.
+     */
+    public interface LastThumbnailListener { void onLastThumbnail(int numOfThumbnails); }
+    private boolean mLastThumbnailHappened;
+    private List<LastThumbnailListener> mLastThumbnailListeners;
+    private int mOnTheFlyRequests;
+    private int mRequests;
+    private int mNumOfThumbnailsForLastThumbnail;
 
     /**
      * The Java interface for listening to thumbnail changes.
@@ -364,6 +377,31 @@ public class TabContentManager {
         return new File(PathUtils.getThumbnailCacheDirectory(), tab.getId() + ".jpeg");
     }
 
+    /**
+     * Add a listener to receive the "Last Thumbnail" event.
+     * Note that this should not be called when there are no tabs.
+     * @param listener A {@link LastThumbnailListener} to be called at the event. Must post the
+     *                 real task and finish immediately.
+     */
+    public void addOnLastThumbnailListener(LastThumbnailListener listener) {
+        ThreadUtils.assertOnUiThread();
+
+        if (mLastThumbnailListeners == null) mLastThumbnailListeners = new ArrayList<>();
+        mLastThumbnailListeners.add(listener);
+        if (mLastThumbnailHappened) notifyOnLastThumbnail();
+    }
+
+    private void notifyOnLastThumbnail() {
+        ThreadUtils.assertOnUiThread();
+
+        if (mLastThumbnailListeners != null) {
+            for (LastThumbnailListener c : mLastThumbnailListeners) {
+                c.onLastThumbnail(mNumOfThumbnailsForLastThumbnail);
+            }
+            mLastThumbnailListeners = null;
+        }
+    }
+
     @VisibleForTesting
     public static Bitmap getJpegForTab(Tab tab) {
         File file = getTabThumbnailFileJpeg(tab);
@@ -372,8 +410,11 @@ public class TabContentManager {
     }
 
     private void getTabThumbnailFromDisk(@NonNull Tab tab, @NonNull Callback<Bitmap> callback) {
+        mOnTheFlyRequests++;
+        mRequests++;
         // Try JPEG thumbnail first before using the more costly
         // TabContentManagerJni.get().getEtc1TabThumbnail.
+        TraceEvent.startAsync("GetTabThumbnailFromDisk", tab.getId());
         new AsyncTask<Bitmap>() {
             @Override
             public Bitmap doInBackground() {
@@ -382,6 +423,13 @@ public class TabContentManager {
 
             @Override
             public void onPostExecute(Bitmap jpeg) {
+                TraceEvent.finishAsync("GetTabThumbnailFromDisk", tab.getId());
+                mOnTheFlyRequests--;
+                if (mOnTheFlyRequests == 0 && !mLastThumbnailHappened) {
+                    mLastThumbnailHappened = true;
+                    mNumOfThumbnailsForLastThumbnail = mRequests;
+                    notifyOnLastThumbnail();
+                }
                 if (jpeg != null) {
                     if (FeatureUtilities.isAllowToRefetchTabThumbnail()) {
                         double jpegAspectRatio = jpeg.getHeight() == 0

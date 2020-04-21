@@ -1432,7 +1432,8 @@ int HttpCache::Transaction::DoDoneHeadersAddToEntryComplete(int result) {
   cache_pending_ = false;
   done_headers_create_new_entry_ = false;
 
-  // Speculative fix for rare crash. crbug.com/959194
+  // It is unclear exactly how this state is reached with an ERR_CACHE_RACE, but
+  // this check appears to fix a rare crash. See crbug.com/959194.
   if (result == ERR_CACHE_RACE) {
     TransitionToState(STATE_HEADERS_PHASE_CANNOT_PROCEED);
     return OK;
@@ -3041,9 +3042,13 @@ int HttpCache::Transaction::DoSetupEntryForRead() {
   }
 
   if (partial_) {
-    if (truncated_ || is_sparse_ || !invalid_range_) {
+    if (truncated_ || is_sparse_ ||
+        (!invalid_range_ && (response_.headers->response_code() == 200 ||
+                             response_.headers->response_code() == 206))) {
       // We are going to return the saved response headers to the caller, so
-      // we may need to adjust them first.
+      // we may need to adjust them first. In cases we are handling a range
+      // request to a regular entry, we want the response to be a 200 or 206,
+      // since others can't really be turned into a 206.
       TransitionToState(STATE_PARTIAL_HEADERS_RECEIVED);
       return OK;
     } else {
